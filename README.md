@@ -1,7 +1,7 @@
 # Portfolio Class
 
 ## 1. Objetivo
-Automatizar o cálculo de métricas quantitativas e a comparação entre elas para vários portfólios. Funciona em paralelo com o módeulo `quant_tools.py`.
+Automatizar o cálculo de métricas quantitativas e a comparação entre elas para vários portfólios. Funciona em paralelo com o módulo `quant_tools.py`.
 
 ## 2. Atributos
 ## 2.1 Instância
