@@ -124,43 +124,45 @@ Seja `p` um `Portfolio`.
 
 2. `p.m_returns()`: análogo a `d_returns()`, mas para retornos mensais
 
-3. `p.total_returns()`: variação total do período (Pf - Pi) / Pi, onde Pf (Pi) é o preço final (inicial), anualizado ou não
+3. `p.a_returns()`: análogo a `d_returns()`, mas para retornos anuais (observe que a classe assume, por ora, que `self.prices` refere-se aos preços de fechamento *diários*)
 
-4. `p.acm_returns()`: retornos acumulados, do portfólio como um todo ou dos ativos que o compõem
+4. `p.total_returns()`: variação total do período (Pf - Pi) / Pi, onde Pf (Pi) é o preço final (inicial), anualizado ou não
 
-5. `p.portfolio_return()`: média ponderada dos retornos totais, i.e., `p.total_returns().dot(p.weights)`
+5. `p.acm_returns()`: retornos acumulados, do portfólio como um todo ou dos ativos que o compõem
 
-6. `p.covariance()`: matriz de covariância
+6. `p.portfolio_return()`: média ponderada dos retornos totais, i.e., `p.total_returns().dot(p.weights)`
 
-7. `p.benchmark([portfolios])`: plota o benchmark de `p` contra os `Portfolio`s em portfolios
+7. `p.covariance()`: matriz de covariância
 
-8. `p.beta(benchmark)`: beta do portfólio, tendo como benchmark (e.g., IBOVESPA) `benchmark`
+8. `p.benchmark([portfolios])`: plota o benchmark de `p` contra os `Portfolio`s em portfolios
 
-9. `p.volatility()`: volatilidades diárias, mensais e anuais, do portfólio como um todo ou dos ativos que o compõem
+9. `p.beta(benchmark)`: beta do portfólio, tendo como benchmark (e.g., IBOVESPA) `benchmark`
 
-10. `p.s_index()`: índice de Sharpe, ou Sortino, anualizado
+10. `p.volatility()`: volatilidades diárias, mensais e anuais, do portfólio como um todo ou dos ativos que o compõem
 
-11. `p.var()`: VaR histórico, paramétrico **ou** paramétrico ajustado
+11. `p.s_index()`: índice de Sharpe, ou Sortino, anualizado
 
-12. `p.cvar()`: CVaR histórico, paramétrico **ou** paramétrico ajustado
+12. `p.var()`: VaR histórico, paramétrico **ou** paramétrico ajustado
 
-13. `p.all_vars()`: VaR histórico, paramétrico **e** paramétrico ajustado
+13. `p.cvar()`: CVaR histórico, paramétrico **ou** paramétrico ajustado
 
-14. `p.downside()`: downside (volatilidade dos retornos negativos) do portfólio
+14. `p.all_vars()`: VaR histórico, paramétrico **e** paramétrico ajustado
 
-15. `p.upside()`: upside (volatilidade dos retornos positivos) do portfólio
+15. `p.downside()`: downside (volatilidade dos retornos negativos) do portfólio
 
-16. `p.rol_drawdown()`: drawdown móvel
+16. `p.upside()`: upside (volatilidade dos retornos positivos) do portfólio
 
-17. `p.calc_skewness()`: skewness
+17. `p.rol_drawdown()`: drawdown móvel
 
-18. `p.calc_curtose()`: curtose
+18. `p.calc_skewness()`: skewness
 
-19. `p.shapiro_test()`: teste de Shapiro para verificar a hipótese de normalidade
+19. `p.calc_curtose()`: curtose
 
-20. `p.metrics()`: DataFrame contendo várias métricas do pórtfolio (e.g., todas listadas acima)
+20. `p.shapiro_test()`: teste de Shapiro para verificar a hipótese de normalidade
 
-21. `p.transfer(new_name: str, new_weights: np.array)`: cria um novo `Portfolio`, realizando uma cópia de `p`, de nome `new_name`e pesos `new_weights`. Útil para compararmos portfólios de mesmos ativos e mesmas datas, mas de pesos diferentes
+21. `p.metrics()`: DataFrame contendo várias métricas do pórtfolio (e.g., todas listadas acima)
+
+22. `p.transfer(new_name: str, new_weights: np.array)`: cria um novo `Portfolio`, realizando uma cópia de `p`, de nome `new_name`e pesos `new_weights`. Útil para compararmos portfólios de mesmos ativos e mesmas datas, mas de pesos diferentes
 
 
 ### 5.3 Classe

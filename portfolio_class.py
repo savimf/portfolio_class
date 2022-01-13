@@ -330,11 +330,9 @@ class Portfolio():
         """Retorna os retornos mensais do portfólio, se
         is_portfolio==True, ou dos ativos que o compõem, se
         is_portfolio==False.
-
         Args:
             is_portfolio (bool, optional): retorno do portfólio
             ou dos ativos que o compõem. Padrão: True.
-
         Returns:
             pd.DataFrame
         """
@@ -357,11 +355,9 @@ class Portfolio():
         """Retorna os retornos anuais do portfólio, se
         is_portfolio==True, ou dos ativos que o compõem, se
         is_portfolio==False.
-
         Args:
             is_portfolio (bool, optional): retorno do portfólio
             ou dos ativos que o compõem. Padrão: True.
-
         Returns:
             pd.DataFrame
         """
@@ -764,38 +760,47 @@ class Portfolio():
         return max_drawdown.dropna()
 
 
-    def calc_skewness(self, axis=0, bias=True, nan_policy='propagate') -> float:
-        """Retorna a skewness dos retornos diários. Os parâmetros são os
-        mesmos da função do scipy.stats.
+    @__check('period', ('d', 'm', 'a'))
+    def calc_skewness(self, period: str='d') -> float:
+        """Retorna a skewness da distribuição de retornos diários.
 
         Args:
-            axis (int, optional)
-            bias (bool, optional)
-            nan_policy (str, optional)
+            period (str, optional): distribuição a considerar ('d', 'm', 'a').
+            Padrão: 'd'.
 
         Returns:
             float
         """
-        return skew(self.d_returns(), axis=axis, bias=bias, nan_policy=nan_policy)[0]
+        r = {
+            'd': self.d_returns,
+            'm': self.m_returns,
+            'a': self.a_returns
+        }
+        return skew(r[period]())[0]
 
 
-    def calc_curtose(self, is_excess: bool=True, axis=0, fisher=True, bias=True, nan_policy='propagate') -> float:
-        """Retorna a curtose dos retornos diários. Os parâmetros são os
+    @__check('period', ('d', 'm', 'a'))
+    def calc_curtose(self, is_excess: bool=True, period: str='d') -> float:
+        """Retorna a curtose da distribuição de retornos. Os parâmetros são os
         mesmos da função do scipy.stats.
 
         Args:
             is_excess (bool, optional): se True, retorna curtose - 3.
-            axis (int, optional)
-            bias (bool, optional)
-            nan_policy (str, optional)
+            period (str, optional): distribuição a considerar ('d', 'm', 'a').
+            Padrão: 'd'.
 
         Returns:
             float
         """
-        d_rets = self.d_returns()
+        r = {
+            'd': self.d_returns,
+            'm': self.m_returns,
+            'a': self.a_returns
+        }
+
         if is_excess:
-            return kurtosis(d_rets, axis=axis, fisher=fisher, bias=bias, nan_policy=nan_policy)[0] - 3
-        return kurtosis(d_rets, axis=axis, fisher=fisher, bias=bias, nan_policy=nan_policy)
+            return kurtosis(r[period]())[0] - 3
+        return kurtosis(r[period]())[0]
 
 
     @__check('period', ('d', 'm', 'a'))
@@ -820,8 +825,7 @@ class Portfolio():
         self,
         risk_free_rate: float=rf,
         window: int=21,
-        var_period: str='d',
-        shap_period: str='d',
+        period: str='d',
         benchmark=None
     ) -> pd.DataFrame:
         """Retorna um dataframe com uma coleção de métricas.
@@ -829,9 +833,7 @@ class Portfolio():
         Args:
             risk_free_rate (float, optional): taxa livre de risco. Padrão: 0.03.
             window (int, optional): janela de tempo (drawdown). Padrão: 21.
-            var_period (str, optional): período a ser calculado ('d', 'm', 'a').
-            Padrão: 'd'.
-            shap_period (str, optional): período a ser calculado ('d', 'm', 'a').
+            period (str, optional): período a ser calculado ('d', 'm', 'a').
             Padrão: 'd'.
             benchmark (Portfolio, optional): benchmark (beta). Padrão: None.
 
@@ -843,14 +845,14 @@ class Portfolio():
             'Volatilidade anual': self.volatility().loc['Anual'],
             'Ind. Sharpe': self.s_index(risk_free_rate),
             'Ind. Sortino': self.s_index(risk_free_rate, 'sortino'),
-            'Skewness': self.calc_skewness(),
-            'Ex_Curtose': self.calc_curtose(),
-            f'VaR 99.9 ({var_period})': self.var(which=99.9, period=var_period, is_neg=False),
-            f'CVaR 99.9 ({var_period})': self.cvar(which=99.9, period=var_period),
+            f'Skewness ({period})': self.calc_skewness(period=period),
+            f'Ex_Curtose ({period})': self.calc_curtose(period=period),
+            f'VaR 99.9 ({period})': self.var(which=99.9, period=period, is_neg=False),
+            f'CVaR 99.9 ({period})': self.cvar(which=99.9, period=period),
             f'Max. Drawdown ({window})': self.rol_drawdown(window),
             'Downside': self.downside(),
             'Upside': self.upside(),
-            f'Normal ({shap_period})': self.shapiro_test(shap_period)
+            f'Normal ({period})': self.shapiro_test(period)
         }
 
         df_metrics = pd.DataFrame.from_dict(
@@ -990,8 +992,7 @@ class Portfolio():
         portfolios: list=[],
         risk_free_rate: float=rf,
         window: int=21,
-        var_period: str='d',
-        shap_period: str='d',
+        period: str='d',
         benchmark=None
     ) -> pd.DataFrame:
         """Retorna um dataframe com as métricas de todos os Portfolios
@@ -1001,6 +1002,8 @@ class Portfolio():
             portfolios (list, optional): lista de Portfolios. Padrão: [].
             risk_free_rate (float, optional): taxa livre de risco. Padrão: 0.03.
             window (int, optional): janela de tempo (drawdown). Padrão: 21.
+            period (str, optional): período a ser calculado ('d', 'm', 'a').
+            Padrão: 'd'.
             benchmark (Portfolio, optional): benchmark (beta). Padrão: None.
 
         Raises:
@@ -1021,9 +1024,9 @@ class Portfolio():
                 raise AttributeError('Favor somente listas Portfolios.')
 
 
-            df = portfolios[0].metrics(risk_free_rate, window, var_period, shap_period, benchmark)
+            df = portfolios[0].metrics(risk_free_rate, window, period, benchmark)
             for p in portfolios[1:]:
-                df_ = p.metrics(risk_free_rate, window, var_period, benchmark)
+                df_ = p.metrics(risk_free_rate, window, period, benchmark)
                 df = pd.concat(
                     [df, df_],
                     axis=1,
