@@ -8,7 +8,7 @@ from datetime import datetime as dt
 from dateutil.relativedelta import relativedelta as rd
 from sklearn import metrics
 import statsmodels.api as sm
-from scipy.stats import skew, kurtosis, norm
+from scipy.stats import skew, kurtosis, norm, sem, t
 from scipy.optimize import minimize
 import plotly.graph_objects as go
 import seaborn as sns
@@ -191,39 +191,51 @@ def selic(start: dt, end: dt, is_number: bool=False, period: str='a'):
     return s
 
 
-def returns(prices: pd.DataFrame, which: str='daily', period: str='a', scaled: bool=True):
-    """Retorna um dataframe ou uma série dos retornos (diários) de prices,
-    a depender de 'which', diários, mensais ou anuais, a depender de 'period'.
+def returns(prices: pd.DataFrame, which: str='daily', period: str='a'):
+    """Retorna os retornos (diários/mensais/anuais) de prices, a depender de 'which'.
 
-    Ex: which = 'daily' retorna prices.pct_change().dropna() (retornos diários);
-    which = 'total' retorna (prices.iloc[-1] - prices.iloc[0]) / prices.iloc[0]
-    (retornos totais), que podem ser diários (period = 'd'), mensais
-    (period = 'm') ou anuais (period = 'a');
-    which = 'acm' retorna os retornos acumulados
-    (1 + prices.pct_change().dropna()).cumprod()
+    Ex:
+        - which = 'daily' (retornos diários)
+        - which = 'monthly' (retornos mensais)
+        - which = 'annual' (retornos anuais)
+        - which = 'total' (variação total do período)
+        - which = 'acm' (retornos acumulados)
 
     Args:
         prices (pd.DataFrame): dataframe dos preços de fechamento.
-        which (str, optional): tipo de retorno desejado: diário/total/
-        mensal/acumulado ('daily'/'total'/'monthly'/'acm'). Padrão: 'daily'.
-        period (str, optional): retorno diário/mensal/anual 'd'/'m'/'a'
-        (válido somente para which = 'total'). Padrão: 'a'.
+        which (str, optional): tipo de retorno desejado: Padrão: 'daily'.
+        period (str, optional): válido somente para which = 'total';
+        periodiza o retorno: (1 + r) ** period - 1. Padrão: 'a'.
 
     Returns:
-        pd.DataFrame ou pd.Series: a depender de 'which'; retornos diários
-        (dataframe), totais (series) ou acumulados (dataframe).
+        pd.DataFrame ou pd.Series.
     """
     r = prices.pct_change().dropna()
     if which == 'daily':
         return r
     elif which == 'monthly':
-        return r.groupby(
-            [df.index.year, df.index.month]
-        ).apply(lambda r: (1 + r).prod() - 1)
+        # dataframe com multindex
+        m_rets = r.groupby(
+            [r.index.year, r.index.month]
+        ).apply(lambda x: (1 + x).prod() - 1)
+
+        # deixando o index como Y-m, em datetime
+        m_rets.index = map(
+            lambda d: dt.strptime(f'{d[0]}-{d[1]}', '%Y-%m'), m_rets.index
+        )
+        m_rets.index = m_rets.index.to_period('M')
+        return m_rets
+    elif which == 'annual':
+        a_rets = r.groupby(
+            r.index.year
+        ).apply(lambda x: (1 + x).prod() - 1)
+
+        a_rets.index = pd.to_datetime(a_rets.index.astype(str)).to_period('Y')
+        return a_rets
     elif which == 'total':
         rets = (prices.iloc[-1] - prices.iloc[0]) / prices.iloc[0]
 
-        if not scaled:
+        if period not in ('m', 'a'):
             return rets
 
         n_days = prices.shape[0]
@@ -294,7 +306,7 @@ def market_index(index: str, start: dt, end: dt) -> pd.DataFrame:
     return df
 
 
-def mae(y_true: np.array, y_pred: np.array) -> float:
+def mae(y_true: np.ndarray, y_pred: np.ndarray) -> float:
     """Função que calcula o mean absolute error entre
     y_true e y_pred.
 
@@ -308,7 +320,7 @@ def mae(y_true: np.array, y_pred: np.array) -> float:
     return metrics.mean_absolute_error(y_true, y_pred)
 
 
-def rmse(y_true: np.array, y_pred: np.array) -> float:
+def rmse(y_true: np.ndarray, y_pred: np.ndarray) -> float:
     """Função que calcula o root mean square error entre
     y_true e y_pred.
 
@@ -322,7 +334,7 @@ def rmse(y_true: np.array, y_pred: np.array) -> float:
     return np.sqrt(metrics.mean_squared_error(y_true, y_pred))
 
 
-def error_metrics(y_true: np.array, y_pred: np.array) -> None:
+def error_metrics(y_true: np.ndarray, y_pred: np.ndarray) -> None:
     """Imprime na tela o mae(y_true, y_pred) e rmse(y_true,
     y_pred).
 
@@ -354,6 +366,13 @@ def mae_cov(cov_past: pd.DataFrame, cov_fut: pd.DataFrame) -> float:
     ) / len(np.diag(cov_past))
 
     return round(r, 4) * 100
+
+
+def mean_confidence_interval(data: pd.Series, confidence: float=.95):
+    a = 1.0 * np.array(data)
+    m, se = np.mean(a), sem(a)
+    h = se * t.ppf((1 + confidence) / 2., len(a) - 1)
+    return m, m-h, m+h
 
 
 def cornish_fisher_z(z: float, s: float, k: float) -> float:
@@ -476,7 +495,7 @@ def cvars_gaussian(rets: pd.DataFrame, ret_name: str='Retornos', modified: bool=
     return c_vars
 
 
-def vol(pesos: np.array, cov: pd.DataFrame, annual: bool=True) -> float:
+def vol(pesos: np.ndarray, cov: pd.DataFrame, annual: bool=True) -> float:
     """Retorna a volatilidade, anualizada ou não, a depender
     de 'annual', dados o array de pesos 'pesos' e a matriz
     de covariância 'cov'.
@@ -544,7 +563,7 @@ def sharpe(ret: float, vol: float, risk_free_rate: float) -> float:
     return (ret - risk_free_rate) / vol
 
 
-def minimize_vol(target_return: float, exp_rets: pd.Series, cov: pd.DataFrame) -> np.array:
+def minimize_vol(target_return: float, exp_rets: pd.Series, cov: pd.DataFrame) -> np.ndarray:
     """Retorna os pesos do portfólio de mínima volatilidade, dado
     o retorno 'target_return', os retornos esperados 'exp_rets' e
     a matriz de covariância 'cov'.
@@ -584,7 +603,7 @@ def minimize_vol(target_return: float, exp_rets: pd.Series, cov: pd.DataFrame) -
     return results.x
 
 
-def maximize_sr(exp_rets: pd.Series, cov: pd.DataFrame, risk_free_rate: float=.03) -> np.array:
+def maximize_sr(exp_rets: pd.Series, cov: pd.DataFrame, risk_free_rate: float=.03) -> np.ndarray:
     """Retorna os pesos do portfólio de máximo índice de sharpe,
     dados os retornos esperados, matriz de covariância e a taxa
     livre de risco.
@@ -636,7 +655,7 @@ def maximize_sr(exp_rets: pd.Series, cov: pd.DataFrame, risk_free_rate: float=.0
     return results.x
 
 
-def gmv(cov: pd.DataFrame) -> np.array:
+def gmv(cov: pd.DataFrame) -> np.ndarray:
     """Retorna os pesos do portfólio GMV.
 
     Args:
@@ -649,7 +668,7 @@ def gmv(cov: pd.DataFrame) -> np.array:
     return maximize_sr(np.repeat(1, n), cov, 0)
 
 
-def optimal_weights(exp_rets: pd.DataFrame, cov: pd.DataFrame, n_points: int) -> np.array:
+def optimal_weights(exp_rets: pd.DataFrame, cov: pd.DataFrame, n_points: int) -> np.ndarray:
     """Retorna uma lista dos pesos que minimizam a volatilidade,
     dados os retornos esperados 'exp_rets' e a matriz de covariância
     'cov'. Considera o retorno esperado mínimo e o máximo para criar

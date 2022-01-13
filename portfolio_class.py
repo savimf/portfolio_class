@@ -4,7 +4,7 @@ import pypfopt as pf
 import quant_tools as qt
 import seaborn as sns
 import matplotlib.pyplot as plt
-from datetime import datetime as dt
+from datetime import datetime as dt, timedelta
 from scipy.stats import skew, kurtosis, shapiro
 from copy import deepcopy
 from functools import wraps
@@ -221,17 +221,17 @@ class Portfolio():
 
 
     @property
-    def weights(self) -> np.array:
+    def weights(self) -> np.ndarray:
         """Distribuição de pesos dos ativos do Portfolio.
 
         Returns:
-            np.array
+            np.ndarray
         """
         return self.__weights
 
 
     @weights.setter
-    def weights(self, new_weights: np.array) -> None:
+    def weights(self, new_weights: np.ndarray) -> None:
         """Atribui novos pesos ao Portfolio. Se o mesmo
         conter apenas um ticker, nenhuma troca será feita,
         pois new_weights = np.array([1]) automaticamente.
@@ -240,7 +240,7 @@ class Portfolio():
         o registro é atualizado.
 
         Args:
-            new_weights (np.array): array com os novos pesos.
+            new_weights (np.ndarray): array com os novos pesos.
 
         Raises:
             ValueError: se np.abs(1 - np.sum(new_weights)) >
@@ -309,7 +309,7 @@ class Portfolio():
     def d_returns(self, is_portfolio: bool=True, col_name: str='Retornos') -> pd.DataFrame:
         """Retorna os retornos diários do portfólio, se
         is_portfolio=True, ou dos ativos que o compõem, se
-        is_postfolio=False.
+        is_portfolio=False.
 
         Args:
             is_portfolio (bool, optional): refere-se aos retornos
@@ -327,36 +327,65 @@ class Portfolio():
 
 
     def m_returns(self, is_portfolio: bool=True) -> pd.DataFrame:
-        d_rets = self.d_returns(is_portfolio=is_portfolio)
-
-        if is_portfolio:
-            # dataframe com multindex
-            m_rets = d_rets.iloc[:, 0].groupby(
-                [d_rets.index.year, d_rets.index.month]
-            ).apply(lambda r: (1 + r).prod() - 1).to_frame()
-
-            # deixando o index como Y-m, em datetime
-            m_rets.index = map(
-                lambda t: dt(t[0], t[1], 1).strftime('%Y-%m'), m_rets.index
-            )
-            return m_rets
-        return d_rets.aggregate(lambda r: qt.returns(r, 'monthly'))
-
-
-    def total_returns(self, scaled: bool=True) -> pd.DataFrame:
-        """Retorna a variação total do período,
-        (preço final - preço inicial) / preço final,
-        se scaled=False; e retorna a variação anualizada se
-        scaled=True.
+        """Retorna os retornos mensais do portfólio, se
+        is_portfolio==True, ou dos ativos que o compõem, se
+        is_portfolio==False.
 
         Args:
-            scaled (bool, optional): refere-se à anualização
-            dos retornos. Padrão: True.
+            is_portfolio (bool, optional): retorno do portfólio
+            ou dos ativos que o compõem. Padrão: True.
 
         Returns:
             pd.DataFrame
         """
-        return qt.returns(self.prices, which='total', scaled=scaled).dropna()
+        d_rets = self.d_returns(is_portfolio=is_portfolio)
+
+        # dataframe com multindex
+        m_rets = d_rets.groupby(
+            [d_rets.index.year, d_rets.index.month]
+        ).apply(lambda r: (1 + r).prod() - 1)
+
+        # deixando o index como Y-m, em datetime
+        m_rets.index = map(
+            lambda d: dt.strptime(f'{d[0]}-{d[1]}', '%Y-%m'), m_rets.index
+        )
+        m_rets.index = m_rets.index.to_period('M')
+        return m_rets
+
+
+    def a_returns(self, is_portfolio: bool=True) -> pd.DataFrame:
+        """Retorna os retornos anuais do portfólio, se
+        is_portfolio==True, ou dos ativos que o compõem, se
+        is_portfolio==False.
+
+        Args:
+            is_portfolio (bool, optional): retorno do portfólio
+            ou dos ativos que o compõem. Padrão: True.
+
+        Returns:
+            pd.DataFrame
+        """
+        d_rets = self.d_returns(is_portfolio)
+
+        a_rets = d_rets.groupby(
+            d_rets.index.year
+        ).apply(lambda r: (1 + r).prod() - 1)
+        a_rets.index = pd.to_datetime(a_rets.index.astype(str)).to_period('Y')
+        return a_rets
+
+
+    def total_returns(self, period: str='a') -> pd.DataFrame:
+        """Retorna a variação total do período,
+        (preço final - preço inicial) / preço final.
+
+        Args:
+            period (str, optional): refere-se à periodização
+            dos retornos ('m' ou 'a'). Padrão: 'a'.
+
+        Returns:
+            pd.DataFrame
+        """
+        return qt.returns(self.prices, which='total', period=period).dropna()
 
 
     def acm_returns(self, is_portfolio: bool=True) -> pd.DataFrame:
@@ -376,18 +405,18 @@ class Portfolio():
         return acm.dropna()
 
 
-    def portfolio_return(self, scaled: bool=True) -> float:
+    def portfolio_return(self, period: str='a') -> float:
         """Retorna o retorno do portfólio, da forma
-        total_returns.dot(weights), anualizado ou não.
+        total_returns.dot(weights).
 
         Args:
-            scaled (bool, optional): refere-se à anualização
-            do retorno. Padrão: True.
+            period (bool, optional): refere-se à periodização
+            do retorno ('m' ou 'a'). Padrão: 'a'.
 
         Returns:
             float
         """
-        return self.total_returns(scaled).dot(self.weights)
+        return self.total_returns(period).dot(self.weights)
 
 
     def covariance(self) -> pd.DataFrame:
@@ -541,7 +570,7 @@ class Portfolio():
             float.
         """
         ret = self.portfolio_return()
-        vols = {'sharpe': self.volatility(), 'sortino': self.downside()}
+        vols = {'sharpe': self.volatility().loc['Anual'], 'sortino': self.downside()}
 
         return qt.sharpe(ret, vols[which], risk_free_rate)
 
@@ -563,8 +592,8 @@ class Portfolio():
             deve ser retornado: 95, 97, 99 ou 99.9. Padrão: None.
             kind (str, optional): módulo de cômputo do var: histórico
             ('hist') ou paramétrico ('param'). Padrão: 'hist'.
-            period (str, optional): VaR dos retornos diários ('d')
-            ou mensais ('m'). Padrão: 'd'.
+            period (str, optional): VaR dos retornos diários ('d'),
+            mensais ('m') ou anuais ('a'). Padrão: 'd'.
             is_neg (bool, optional): se os valores retornados
             devem ser positivos ou negativos. Padrão: True.
             modified (bool, optional): somente válido se kind='param',
@@ -572,15 +601,19 @@ class Portfolio():
             e realiza a correção de Cornish-Fisher.
 
         Raises:
-            KeyError: se period not in ('d', 'm').
+            KeyError: se period not in ('d', 'm', 'a').
 
         Returns:
             pd.Series, se which == None, ou float, se which != None.
         """
-        if period not in ('d', 'm'):
-            raise KeyError("Period inválido: usar 'd' ou 'm'.")
+        if period not in ('d', 'm', 'a'):
+            raise KeyError("Period inválido: usar 'd', 'm' ou 'a'.")
 
-        d_period = {'d': self.d_returns, 'm': self.m_returns}
+        d_period = {
+            'd': self.d_returns,
+            'm': self.m_returns,
+            'a': self.a_returns
+        }
 
         if kind == 'hist':
             var = pd.Series(qt.vars_hist(d_period[period]()))
@@ -615,8 +648,8 @@ class Portfolio():
             deve ser retornado: 95, 97, 99 ou 99.9. Padrão: None.
             kind (str, optional): módulo de cômputo do CVaR: histórico
             ('hist') ou paramétrico ('param'). Padrão: 'hist'.
-            period (str, optional): VaR dos retornos diários ('d')
-            ou mensais ('m'). Padrão: 'd'.
+            period (str, optional): CVaR dos retornos diários ('d'),
+            mensais ('m') ou anuais ('a'). Padrão: 'd'.
             is_neg (bool, optional): se os valores retornados
             devem ser positivos ou negativos. Padrão: True.
             modified (bool, optional): somente válido se kind='param',
@@ -630,10 +663,14 @@ class Portfolio():
         Returns:
             pd.Series, se which == None, ou float, se which != None.
         """
-        if period not in ('d', 'm'):
-            raise KeyError("Period inválido: usar 'd' ou 'm'.")
+        if period not in ('d', 'm', 'a'):
+            raise KeyError("Period inválido: usar 'd', 'm' ou 'a'.")
 
-        d_period = {'d': self.d_returns, 'm': self.m_returns}
+        d_period = {
+            'd': self.d_returns,
+            'm': self.m_returns,
+            'a': self.a_returns
+        }
 
         if kind == 'hist':
             cvar = pd.Series(qt.cvars_hist(d_period[period]()))
@@ -656,8 +693,8 @@ class Portfolio():
         e paramétrico ajustado.
 
         Args:
-            period (str, optional): VaR dos retornos diários ('d') ou
-            mensais ('m'). Padrão: 'd'.
+            period (str, optional): VaR dos retornos diários ('d'),
+            mensais ('m') ou anuais ('a'). Padrão: 'd'.
             is_neg (bool, optional): se os valores retornados
             devem ser positivos ou negativos. Padrão: True.
 
@@ -761,25 +798,40 @@ class Portfolio():
         return kurtosis(d_rets, axis=axis, fisher=fisher, bias=bias, nan_policy=nan_policy)
 
 
-    def shapiro_test(self, confidence: float=.05) -> bool:
+    @__check('period', ('d', 'm', 'a'))
+    def shapiro_test(self, period: str='d', confidence: float=.05) -> bool:
         """Verifica, dentro de um nível de confiança 'confidence',
-        se os retornos diários assumem uma distribuição normal.
+        se os retornos diários/mensais/anuais assumem uma distribuição normal.
 
         Returns:
             bool
         """
-        if shapiro(self.d_returns())[1] < .05:
+        rets = {
+            'd': self.d_returns,
+            'm': self.m_returns,
+            'a': self.a_returns
+        }
+        if shapiro(rets[period]())[1] < confidence:
             return False
         return True
 
 
-    def metrics(self, risk_free_rate: float=rf, window: int=21, var_period: str='d', benchmark=None) -> pd.DataFrame:
+    def metrics(
+        self,
+        risk_free_rate: float=rf,
+        window: int=21,
+        var_period: str='d',
+        shap_period: str='d',
+        benchmark=None
+    ) -> pd.DataFrame:
         """Retorna um dataframe com uma coleção de métricas.
 
         Args:
             risk_free_rate (float, optional): taxa livre de risco. Padrão: 0.03.
             window (int, optional): janela de tempo (drawdown). Padrão: 21.
-            var_period (str, optional): período a ser calculado ('d', 'm').
+            var_period (str, optional): período a ser calculado ('d', 'm', 'a').
+            Padrão: 'd'.
+            shap_period (str, optional): período a ser calculado ('d', 'm', 'a').
             Padrão: 'd'.
             benchmark (Portfolio, optional): benchmark (beta). Padrão: None.
 
@@ -788,7 +840,7 @@ class Portfolio():
         """
         dict_metrics = {
             'Retorno anual': self.portfolio_return(),
-            'Volatilidade anual': self.volatility(),
+            'Volatilidade anual': self.volatility().loc['Anual'],
             'Ind. Sharpe': self.s_index(risk_free_rate),
             'Ind. Sortino': self.s_index(risk_free_rate, 'sortino'),
             'Skewness': self.calc_skewness(),
@@ -798,7 +850,7 @@ class Portfolio():
             f'Max. Drawdown ({window})': self.rol_drawdown(window),
             'Downside': self.downside(),
             'Upside': self.upside(),
-            'Normal': self.shapiro_test()
+            f'Normal ({shap_period})': self.shapiro_test(shap_period)
         }
 
         df_metrics = pd.DataFrame.from_dict(
@@ -815,7 +867,7 @@ class Portfolio():
         return df_metrics
 
 
-    def transfer(self, new_name: str, new_weights: np.array):
+    def transfer(self, new_name: str, new_weights: np.ndarray):
         """Método que transfere os dados do Portoflio original,
         como tickers, datas e preços, para um novo Portfolio, cujo
         nome e pesos serão 'new_name' e 'new_weights'.
@@ -835,13 +887,13 @@ class Portfolio():
 
 
     @classmethod
-    def all_rets(cls, scaled: bool=True) -> pd.Series:
+    def all_rets(cls, period: str='a') -> pd.Series:
         """Retorna um pd.Series com os retornos de todos
         os Portfolios registrados.
 
         Args:
-            scaled (bool, optional): se True, os retornos serão
-            anualizados. Padrão: True.
+            period (str, optional): refere-se à periodização
+            dos retornos ('m' ou 'a'). Padrão: 'a'.
 
         Raises:
             NotImplementedError: se len(Portfolio.registered) == 0.
@@ -852,7 +904,7 @@ class Portfolio():
         if len(cls.registered) > 0:
             return pd.Series(
                 {
-                    n: p.portfolio_return(scaled)
+                    n: p.portfolio_return(period)
                     for n, p in cls.registered.items()
                 }
             )
@@ -860,7 +912,7 @@ class Portfolio():
 
 
     @classmethod
-    def all_vols(cls) -> pd.Series:
+    def all_vols(cls, period: str='a') -> pd.Series:
         """Retorna um pd.Series com as volatilidades (anualizadas)
         de todos os Portfolios registrados.
 
@@ -870,10 +922,15 @@ class Portfolio():
         Returns:
             pd.Series
         """
+        d_per = {
+            'd': 'Diária',
+            'm': 'Mensal',
+            'a': 'Anual'
+        }
         if len(cls.registered) > 0:
             return pd.Series(
                 {
-                    n: p.volatility()
+                    n: p.volatility().loc[d_per[period]]
                     for n, p in cls.registered.items()
                 }
             )
@@ -883,8 +940,8 @@ class Portfolio():
     @classmethod
     @__check('which', ('sharpe', 'sortino'))
     def all_sindex(cls, risk_free_rate: float=rf, *, which='sharpe') -> pd.Series:
-        """Retorna um pd.Series com o índice de Sharpe (ou Sortino)
-        de todos os Portfolios registrados.
+        """Retorna um pd.Series com o índice de Sharpe (ou Sortino),
+        anualizado, de todos os Portfolios registrados.
 
         Args:
             risk_free_rate (float, optional): taxa livre de risco. Padrão: 0.03.
@@ -934,6 +991,7 @@ class Portfolio():
         risk_free_rate: float=rf,
         window: int=21,
         var_period: str='d',
+        shap_period: str='d',
         benchmark=None
     ) -> pd.DataFrame:
         """Retorna um dataframe com as métricas de todos os Portfolios
@@ -963,7 +1021,7 @@ class Portfolio():
                 raise AttributeError('Favor somente listas Portfolios.')
 
 
-            df = portfolios[0].metrics(risk_free_rate, window, var_period, benchmark)
+            df = portfolios[0].metrics(risk_free_rate, window, var_period, shap_period, benchmark)
             for p in portfolios[1:]:
                 df_ = p.metrics(risk_free_rate, window, var_period, benchmark)
                 df = pd.concat(
