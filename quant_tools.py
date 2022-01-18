@@ -215,9 +215,11 @@ def returns(prices: pd.DataFrame, which: str='daily', period: str='a'):
         return r
     elif which == 'monthly':
         # dataframe com multindex
+        # np.log1p(r) = np.log(1 + r)
+        # np.expm1(r) = np.exp(r - 1)
         m_rets = r.groupby(
             [r.index.year, r.index.month]
-        ).apply(lambda x: (1 + x).prod() - 1)
+        ).apply(lambda x: np.expm1(np.log1p(x).sum()))
 
         # deixando o index como Y-m, em datetime
         m_rets.index = map(
@@ -228,7 +230,7 @@ def returns(prices: pd.DataFrame, which: str='daily', period: str='a'):
     elif which == 'annual':
         a_rets = r.groupby(
             r.index.year
-        ).apply(lambda x: (1 + x).prod() - 1)
+        ).apply(lambda x: np.expm1(np.log1p(x).sum()))
 
         a_rets.index = pd.to_datetime(a_rets.index.astype(str)).to_period('Y')
         return a_rets
@@ -518,6 +520,13 @@ def vol(pesos: np.ndarray, cov: pd.DataFrame, annual: bool=True) -> float:
     return vol
 
 
+def max_drawdown(rets):
+    acm = (1 + rets).cumprod()
+    peaks = acm.cummax()
+    drawdown_ = acm / peaks - 1
+    return drawdown_.min()
+
+
 def beta(ret_carteira: pd.DataFrame, ret_ibvsp: pd.DataFrame) -> float:
     """Calcula o beta da carteira, dados seus retornos diários e
     os retornos do ibovespa.
@@ -734,6 +743,101 @@ def find_port_max_sr(portfolios: pd.DataFrame, col_name: str='Ind. Sharpe') -> p
         columns={port_max_sr.index[0]: 'Valores'}
     )
     return port_max_sr
+
+
+def run_cppi(
+    risky_r: pd.DataFrame,
+    safe_r: pd.DataFrame=None,
+    m: int=3,
+    start: float=1000,
+    floor: float=.8,
+    risk_free_rate: float=.1,
+    drawdown: float=None
+) -> dict:
+    """Realiza um backtest da estratégia CPPI, considerando os
+    retornos do ativo de risco (risky_r) e do ativo de segurança
+    (safe_r). Retorna um dicioário contendo:
+
+    - wealth: valores históricos do investimento, com a estratégia
+    - risky_wealth: valores históricos do investimento, sem a estratégia
+    - risk_budget: histórico do cushion
+    - risky_allocation: pesos que foram atribuídos a risky_r
+    - m: multiplicador de agressividade
+    - start: valor inicial do investimento
+    - floor: históricos dos valores mínimos
+
+    Args:
+        risky_r (pd.DataFrame): retornos do ativo de risco
+        safe_r (pd.DataFrame, optional): retornos do ativo de segurança.
+        Se None, risk_free_rate / 12 é utilizado num dataframe. Padrão: None.
+        m (int, optional): multiplicador de agressividade. Padrão: 3.
+        start (float, optional): valor inicial do investimento. Padrão: 1000.
+        floor (float, optional): percentual mínimo aceito. Padrão: 0.8.
+        risk_free_rate (float, optional): taxa livre de risco; só participa se
+        safe_r == None. Padrão: 0.1.
+        drawdown (float, optional): drawdown máximo aceito; atualiza o floor a
+        cada etapa da estratégia. Padrão: None.
+
+    Returns:
+        dict
+    """
+    # parâmetros
+    dates = risky_r.index
+    n_steps = len(dates)
+    account_value = start
+    peak = start
+    floor_value = start * floor
+
+    if isinstance(risky_r, pd.Series):
+        risky_r = pd.DataFrame(risky_r, columns=['R'])
+
+    if safe_r is None:
+        safe_r = pd.DataFrame().reindex_like(risky_r)
+        safe_r.values[:] = risk_free_rate / 12
+
+    account_hist = pd.DataFrame().reindex_like(risky_r)
+    cushion_hist = pd.DataFrame().reindex_like(risky_r)
+    risky_w_hist = pd.DataFrame().reindex_like(risky_r)
+    floor_value_hist = pd.DataFrame().reindex_like(risky_r)
+
+    for step in range(n_steps):
+        # atualização do floor na presença de drawdown
+        if drawdown:
+            peak = np.maximum(peak, account_value)
+            floor_value = peak * (1 - drawdown)
+            floor_value_hist.iloc[step] = floor_value
+
+        # calculando os pesos
+        cushion = (account_value - floor_value) / account_value
+        risky_w = m * cushion
+        risky_w = np.minimum(risky_w, 1)  # não permite peso acima de 1
+        risky_w = np.maximum(risky_w, 0)  # não permite peso abaixo de 0
+        safe_w = 1 - risky_w
+
+        # alocações
+        risky_alloc = account_value * risky_w
+        safe_alloc = account_value * safe_w
+
+        # atualizando os valores com base nos pesos e alocações
+        account_value = risky_alloc * (1 + risky_r.iloc[step]) + \
+            safe_alloc * (1 + safe_r.iloc[step])
+
+        # salvando-os
+        cushion_hist.iloc[step] = cushion
+        risky_w_hist.iloc[step] = risky_w
+        account_hist.iloc[step] = account_value
+
+    risky_wealth = start * (1 + risky_r).cumprod()
+
+    return {
+        'wealth': account_hist['Retornos'],
+        'risky_wealth': risky_wealth['Retornos'],
+        'risk_budget': cushion_hist['Retornos'],
+        'risky_allocation': risky_w_hist['Retornos'],
+        'm': m,
+        'start': start,
+        'floor': floor_value if drawdown is None else floor_value_hist['Retornos']
+    }
 
 
 def plot_portfolios(

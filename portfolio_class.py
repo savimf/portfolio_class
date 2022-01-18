@@ -135,19 +135,24 @@ class Portfolio():
 
 
     @classmethod
-    def unregister(cls, name: str, is_all: bool=False) -> None:
+    def unregister(cls, name: str=None, is_all: bool=False) -> None:
         """Remove o Portfolio de nome 'name' do dicionário
         registered. Se is_all = True, todos os nomes são
         apagados.
 
         Args:
-            name (str): nome do Portfolio.
+            name (str, optional): nome do Portfolio. Padrão: None.
             is_all (bool, optional) se True, realize o método
             clear() em registered.
+
+        Raises:
+            NameError: se name is None e is_all == False.
         """
         if is_all:
             cls.registered.clear()
         else:
+            if name is None:
+                raise NameError('Favor inserir um nome.')
             del cls.registered[name]
 
 
@@ -339,9 +344,11 @@ class Portfolio():
         d_rets = self.d_returns(is_portfolio=is_portfolio)
 
         # dataframe com multindex
+        # np.log1p(r) = np.log(1 + r)
+        # np.expm1(r) = np.exp(r - 1)
         m_rets = d_rets.groupby(
             [d_rets.index.year, d_rets.index.month]
-        ).apply(lambda r: (1 + r).prod() - 1)
+        ).apply(lambda r: np.expm1(np.log1p(x).sum()))
 
         # deixando o index como Y-m, em datetime
         m_rets.index = map(
@@ -363,9 +370,11 @@ class Portfolio():
         """
         d_rets = self.d_returns(is_portfolio)
 
+        # np.log1p(r) = np.log(1 + r)
+        # np.expm1(r) = np.exp(r - 1)
         a_rets = d_rets.groupby(
             d_rets.index.year
-        ).apply(lambda r: (1 + r).prod() - 1)
+        ).apply(lambda r: np.expm1(np.log1p(x).sum()))
         a_rets.index = pd.to_datetime(a_rets.index.astype(str)).to_period('Y')
         return a_rets
 
