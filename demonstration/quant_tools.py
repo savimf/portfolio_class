@@ -151,16 +151,15 @@ def selic(start: dt, end: dt, is_number: bool=False, period: str='a'):
         if period not in ('d', 'm', 'a'):
             raise IndexError("Invalid period. Use 'd', 'm' or 'a'.")
 
-        s_mean = s.mean()
-        n_months = s.shape[0]
+        s = s.mean()
 
         # annual / monthly / daily
         if period == 'a':
-            s = (1 + s_mean) ** (12 / n_months) - 1
-        elif period == 'm':
             pass
+        elif period == 'm':
+            s = (1 + s) ** (1 / 12) - 1
         elif period == 'd':
-            s = (1 + s_mean) ** (1 / (21 * n_months)) - 1
+            s = (1 + s) ** (1 / 252) - 1
     return s
 
 
@@ -203,13 +202,13 @@ def returns(prices: pd.DataFrame, which: str='daily', period: str='a'):
     elif which == 'monthly':
         m_rets = r.resample('M').apply(
             compound
-        ).to_period('M')
+        )
 
         return m_rets
     elif which == 'annual':
         a_rets = r.resample('Y').apply(
             compound
-        ).to_period('Y')
+        )
 
         return a_rets
     elif which == 'total':
@@ -840,6 +839,27 @@ def run_cppi(
     }
 
 
+def get_eff(exp_rets: pd.Series, cov: pd.DataFrame, n_points: int=25) -> pd.DataFrame:
+    """Returns a pd.DataFrame with the n_points portfolios composing
+    the efficient frontier. The dataframe contains the columns: 'Returns'
+    and 'Volatility'.
+
+    Args:
+        exp_rets (pd.Series): return series.
+        cov (pd.DataFrame): covariance matrix.
+        n_points (int, optional): number of portfolios to build the frontier.
+        Defaults to 25.
+
+    Returns:
+        pd.DataFrame.
+    """
+    weights = optimal_weights(exp_rets, cov, n_points)
+
+    rets = [exp_rets.dot(w) for w in weights]
+    vols = [vol(w, cov) for w in weights]
+    return pd.DataFrame({'Returns': rets, 'Volatility': vols})
+
+
 def plot_portfolios(
     portfolios: pd.DataFrame, color: str='brg',
     size: tuple=(12, 10), is_return: bool= False,
@@ -899,11 +919,12 @@ def plot_portfolios(
 
 def plot_eff(
     exp_rets: pd.DataFrame, cov: pd.DataFrame,
-    n_points: int=25, n_years: int=2, risk_free_rate: float=.03,
+    n_points: int=25, risk_free_rate: float=.03,
     show_cml: bool=False, show_ew: bool=False,
-    show_gmv: bool=False, style: str='.-',
-    size: tuple=(12, 6), is_return: bool=False,
-    save: bool=False
+    show_gmv: bool=False, plot_in: str='sns',
+    size: tuple=(15, 6), style: str='.-',
+    name: str=None, is_return: bool=False,
+    **kwargs
 ):
     """Plots the efficient frontier, given the expected returns
     and the covariance matrix.
@@ -913,8 +934,6 @@ def plot_eff(
         cov (pd.DataFrame): covariance matrix.
         n_points (int, optional): number of points to be shown in
         the frontier. Default: 25.
-        n_years (int, optional): number of years to annualized the return.
-        Default: 2.
         risk_free_rate (float, optional): risk-free rate. Default: 0.03.
         show_cml (bool, optional): if True, plots the line that connects
         the risk-free asset with the maximum Sharpe ratio portfolio (known
@@ -923,69 +942,162 @@ def plot_eff(
         folio. Default: False.
         show_gmv (bool, optional): if True, plots the GVM portfolio.
         Default: False.
-        style (str, optional): line style. Default: '.-'.
-        size (tuple, optional): plot size. Default: (12, 6).
+        plot_in (str, optional): 'sns' or 'go'. Default: 'sns'.
+        size (tuple, optional): plot size. Default: (15, 6).
+        style (str, optional): linestyle (only valid if plot_in == 'sns').
+        Default: '.-'.
+        name (str, optional): if != None, saves the plot in the 'save_path'
+        directory. Default: None.
         is_return (bool, optional): if True, returns the plot, instead of just
         showing it. Default: False.
-        save (bool, optional): if True, saves the plot in the save_path dire-
-        ctory, with name 'gen_portfolios.png'. Default: False.
 
-    Returns:
-        matplotlib axis, if is_return == True.
+    Raises:
+        TypeError: if plot_in not in ('sns', 'go').
+        NameError: if len(name) == 0.
     """
-    weights = optimal_weights(exp_rets, cov, n_points)
+    eff = get_eff(exp_rets, cov, n_points)
 
-    rets = [(1 + exp_rets.dot(w)) ** (1 / n_years) - 1 for w in weights]
-    vols = [vol(w, cov, False) for w in weights]
-
-    ef = pd.DataFrame({'Returns': rets, 'Volatility': vols})
-    ax = ef.plot.line(x='Volatility', y='Returns', style=style, figsize=size, legend=False)
-
-    plt.ylabel('Returns')
-
-    if show_ew:
-        n = exp_rets.shape[0]
-        w_ew = np.repeat(1/n, n)
-        r_ew = (1 + exp_rets.dot(w_ew)) ** (1 / n_years) - 1
-        v_ew = vol(w_ew, cov, False)
-
-        ax.plot([v_ew], [r_ew], color='goldenrod', marker='o', markersize=10, label='EW')
-
-    if show_gmv:
-        w_gmv = gmv(cov)
-        r_gmv = (1 + exp_rets.dot(w_gmv)) ** (1 / n_years) - 1
-        v_gmv = vol(w_gmv, cov, False)
-
-        ax.plot([v_gmv], [r_gmv], color='midnightblue', marker='o', markersize=10, label='GMV')
-
-    if show_cml:
-        ax.set_xlim(left=0)
-
-        w_msr = maximize_sr(exp_rets, cov, risk_free_rate)
-        r_msr = (1 + exp_rets.dot(w_msr)) ** (1 / n_years) - 1
-        v_msr = vol(w_msr, cov, False)
-
-        # add capital market line
-        cml_x = [0, v_msr]
-        cml_y = [risk_free_rate, r_msr]
-
-        ax.plot(
-            cml_x,
-            cml_y,
-            color='green',
-            marker='o',
-            linestyle='dashed',
-            markersize=10,
-            linewidth=2,
-            label='Cap. Market Line'
+    if plot_in == 'sns':
+        ax = eff.plot.line(
+            x='Volatility', y='Returns',
+            figsize=size, style=style,
+            legend=False, **kwargs
         )
+        if show_ew:
+            n = exp_rets.shape[0]
+            w_ew = np.repeat(1/n, n)
+            r_ew = exp_rets.dot(w_ew)
+            v_ew = vol(w_ew, cov)
 
-    plt.legend()
+            ax.plot(
+                [v_ew], [r_ew],
+                color='goldenrod', marker='o',
+                markersize=10, label='EW'
+            )
+        if show_gmv:
+            w_gmv = gmv(cov)
+            r_gmv = exp_rets.dot(w_gmv)
+            v_gmv = vol(w_gmv, cov)
 
-    if save:
-        plt.savefig(save_path + 'gen_portfolios.png', dpi=200)
+            ax.plot(
+                [v_gmv], [r_gmv],
+                color='midnightblue', marker='o',
+                markersize=10, label='GMV'
+            )
+        if show_cml:
+            ax.set_xlim(left=0)
 
-    return ax if is_return else plt.show()
+            w_msr = maximize_sr(exp_rets, cov, risk_free_rate)
+            r_msr = exp_rets.dot(w_msr)
+            v_msr = vol(w_msr, cov)
+
+            # add capital market line
+            cml_x = [0, v_msr]
+            cml_y = [risk_free_rate, r_msr]
+
+            ax.plot(
+                cml_x, cml_y,
+                color='green',
+                marker='o',
+                linestyle='dashed',
+                markersize=10,
+                linewidth=2,
+                label='Cap. Market Line'
+            )
+        plt.title('Efficient Frontier and the Cap. Market Line')
+        plt.ylabel('Return')
+        plt.legend()
+
+        if name:
+            if len(name) > 0:
+                plt.savefig(save_path + str(name) + '.png', dpi=200)
+            else:
+                raise NameError('Figure name must have, at least, one character.')
+
+        return ax if is_return else plt.show()
+    elif plot_in == 'go':
+        titles = [
+            'Efficient Frontier and the Cap. Market Line',
+            'Volatility',
+            'Return'
+        ]
+
+        layout = layout_settings(titles)
+        fig = go.Figure(layout=layout)
+
+        fig.add_trace(
+            go.Scatter(
+                x=eff['Volatility'],
+                y=eff['Returns'],
+                mode='lines+markers',
+                marker={
+                    'line': {
+                        'color': '#333',
+                        'width': .5
+                    }
+                },
+                name='Efficient Frontier',
+                **kwargs
+            )
+        )
+        if show_ew:
+            n = exp_rets.shape[0]
+            w_ew = np.repeat(1/n, n)
+            r_ew = exp_rets.dot(w_ew)
+            v_ew = vol(w_ew, cov)
+
+            fig.add_trace(
+                go.Scatter(
+                    x=[v_ew],
+                    y=[r_ew],
+                    mode='markers',
+                    name='EW',
+                    marker={
+                        'color': 'yellow',
+                        'size': 10
+                    }
+                )
+            )
+        if show_gmv:
+            w_gmv = gmv(cov)
+            r_gmv = exp_rets.dot(w_gmv)
+            v_gmv = vol(w_gmv, cov)
+
+            fig.add_trace(
+                go.Scatter(
+                    x=[v_gmv],
+                    y=[r_gmv],
+                    mode='markers',
+                    name='GMV',
+                    marker={
+                        'color': 'darkblue',
+                        'size': 10
+                    }
+                )
+            )
+        if show_cml:
+            w_msr = maximize_sr(exp_rets, cov, risk_free_rate)
+            r_msr = exp_rets.dot(w_msr)
+            v_msr = vol(w_msr, cov)
+
+            fig.add_trace(
+                go.Scatter(
+                    x=[0, v_msr],
+                    y=[risk_free_rate, r_msr],
+                    mode='lines+markers',
+                    name='Cap. Market Line',
+                    marker={
+                        'color': 'green',
+                        'size': 10,
+                        'opacity': .7,
+                        'line': {'width': .8}
+                    },
+                    line={'dash': 'dash'}
+                )
+            )
+        return fig if is_return else fig.show()
+    else:
+        raise TypeError("Invalid parameter. Use 'sns' or 'go'.")
 
 
 def comparison(vol_opt: float, vol_eq: float, ret_opt: float, ret_eq: float, risk_free_rate: float) -> None:
@@ -1040,7 +1152,7 @@ def comparison(vol_opt: float, vol_eq: float, ret_opt: float, ret_eq: float, ris
     )
 
 
-def layout_settings(titles: list=[]) -> go.Layout:
+def layout_settings(titles: list=[], **kwargs) -> go.Layout:
     """Settings to use in plotly graphs.
 
     Args:
@@ -1068,7 +1180,8 @@ def layout_settings(titles: list=[]) -> go.Layout:
         ),
         plot_bgcolor="#FFF",
         hoverdistance=100,
-        spikedistance=1000
+        spikedistance=1000,
+        **kwargs
     )
     return layout
 
@@ -1099,7 +1212,14 @@ def plot_heat_go(df: pd.DataFrame, title: str='Correlations', color: str='YlOrRd
     fig.show()
 
 
-def plot_returns_sns(rets: pd.Series, titles: list=None, size: tuple=(12, 8), **kwargs) -> None:
+def plot_returns(
+    rets: pd.Series,
+    titles: list=None,
+    plot_in: str='sns',
+    size: tuple=(12, 8),
+    is_return: bool=False,
+    **kwargs
+):
     """Horizontal bar plot of a return series, using #de2d26
     (#3182bd) for negative (positive) values.
 
@@ -1108,37 +1228,73 @@ def plot_returns_sns(rets: pd.Series, titles: list=None, size: tuple=(12, 8), **
         titles (list, optional): plot labels and title, as
             - [title, xlabel, ylabel].
         Default: None.
-        size (tuple, optional): plot size. Padrão: (12, 8).
+        plot_in (str, optional): 'sns' or 'go'. Default: 'sns'.
+        size (tuple, optional): plot size. Default: (12, 8).
+        is_return (bool, optional): if True, returns the plot, instead of
+        just showing it. Default: False.
+
+    Raises:
+        TypeError: if plot_in not in ('sns', 'go').
     """
     rets = rets.sort_values(ascending=True)
+    colors = ['#de2d26' if r < 0 else '#3182bd' for r in rets.values]
 
-    cores = ['#de2d26' if v < 0 else '#3182bd' for v in rets.values]
+    if plot_in == 'sns':
 
-    plt.subplots(figsize=size)
-    sns.barplot(
-        x=rets.values,
-        y=rets.index,
-        palette=cores,
-        **kwargs
-    )
-    plt.title(titles[0])
-    plt.xlabel(titles[1])
-    plt.ylabel(titles[2])
+        plt.subplots(figsize=size)
+        ax = sns.barplot(
+            x=rets.values,
+            y=rets.index,
+            palette=colors,
+            **kwargs
+        )
+        plt.title(titles[0])
+        plt.xlabel(titles[1])
+        plt.ylabel(titles[2])
+
+        return ax if is_return else plt.show()
+    elif plot_in == 'go':
+        layout = layout_settings(titles)
+        fig = go.Figure(layout=layout)
+
+        fig.add_trace(
+            go.Bar(
+                x=rets.values,
+                y=rets.index,
+                marker={
+                    'color': colors,
+                    'line': {
+                        'color': '#333',
+                        'width': 2
+                    }
+                },
+                hoverinfo='x',
+                orientation='h',
+                **kwargs
+            )
+        )
+        return fig if is_return else fig.show()
+    else:
+        raise TypeError("Invalid parameter. Use 'sns' or 'go'.")
 
 
 def plot_monthly_returns(
     rets: pd.Series,
     title: str='Montly Returns',
+    plot_in: str='sns',
     show_mean: bool=True,
     show_median: bool=True,
     size: tuple=(18, 6),
     name: str=None,
-    is_return: bool=False
-) -> None:
+    is_return: bool=False,
+    **kwargs
+):
     """Function to plot the monthly returns given in rets.
 
     Args:
         rets (pd.Series): monthly return series.
+        title (str, optional): plot title. Default: 'Monthly Returns'.
+        plot_in (str, optional): 'sns' or 'go'. Default: 'sns'.
         show_mean (bool, optional): if True, shows the return mean.
         Default: True.
         show_median (bool, optional): if True, shows the return median.
@@ -1150,35 +1306,90 @@ def plot_monthly_returns(
         just showing it. Default: False.
 
     Raises:
+        TypeError: if plot_in not in ('sns', 'go').
         NameError: if len(name) == 0.
     """
-    colors = map(lambda r: 'indianred' if r < 0 else 'blue', rets)
+    if plot_in == 'sns':
+        colors = ['indianred' if r < 0 else 'blue' for r in rets]
 
-    fig, ax = plt.subplots(figsize=size)
-    rets.plot.bar(
-        ax=ax,
-        color=list(colors),
-        label='Returns'
-    )
+        fig, ax = plt.subplots(figsize=size)
+        rets.plot.bar(
+            ax=ax,
+            color=colors,
+            label='Returns',
+            **kwargs
+        )
 
-    if show_mean:
-        ax.axhline(y=rets.mean(), ls=':', color='green', label='Mean')
-    if show_median:
-        ax.axhline(y=rets.median(), ls='-', color='goldenrod', label='Median')
+        if show_mean:
+            ax.axhline(y=rets.mean(), ls=':', color='green', label='Mean')
+        if show_median:
+            ax.axhline(y=rets.median(), ls='-', color='goldenrod', label='Median')
 
-    if show_mean or show_median:
-        plt.legend()
+        if show_mean or show_median:
+            plt.legend()
 
-    plt.title(title)
-    plt.ylabel('%')
+        plt.title(title)
+        plt.ylabel('%')
 
-    if name:
-        if len(name) > 0:
-            plt.savefig(save_path + str(name) + '.png', dpi=200)
-        else:
-            raise NameError('Figure name must have, at least, one character.')
+        if name:
+            if len(name) > 0:
+                plt.savefig(save_path + str(name) + '.png', dpi=200)
+            else:
+                raise NameError('Figure name must have, at least, one character.')
 
-    return ax if is_return else plt.show()
+        return ax if is_return else plt.show()
+    elif plot_in == 'go':
+        colors = ['#de2d26' if r < 0 else '#3182bd' for r in rets.values]
+        layout = layout_settings(
+            titles=[title, 'Date', '%']
+        )
+        fig = go.Figure(layout=layout)
+
+        rets.index = rets.index.to_timestamp()
+        fig.add_trace(
+            go.Bar(
+                x=rets.index,
+                y=rets.values,
+                name='Returns',
+                marker={
+                    'color': colors,
+                    'line': {
+                        'color': '#333',
+                        'width': 2
+                    }
+                },
+                **kwargs
+            )
+        )
+        if show_mean:
+            fig.add_trace(
+                go.Scatter(
+                    x=[rets.index[0], rets.index[-1]],
+                    y=[rets.mean(), rets.mean()],
+                    name='mean',
+                    marker={
+                        'color': '#feb24c',
+                        'opacity': .7,
+                        'line': {'width': .8}
+                    }
+                )
+            )
+        if show_median:
+            fig.add_trace(
+                go.Scatter(
+                    x=[rets.index[0], rets.index[-1]],
+                    y=[rets.median(), rets.median()],
+                    name='median',
+                    marker={
+                        'color': '#c51b8a',
+                        'opacity': .7,
+                        'line': {'width': .8}
+                    }
+                )
+            )
+        return fig if is_return else fig.show()
+    else:
+        raise TypeError("Invalid parameter. Use 'sns' or 'go'.")
 
 
 def plot_lines(
@@ -1221,8 +1432,9 @@ def plot_lines(
         plt.figure(figsize=size)
         ax = sns.lineplot(
             data=df_,
+            linewidth=1.5,
+            dashes=False,
             **kwargs
-
         )
         plt.title(titles[0])
         plt.xlabel(titles[1])
@@ -1237,7 +1449,6 @@ def plot_lines(
         return ax if is_return else plt.show()
     elif plot_in == 'go':
         layout = layout_settings(titles)
-
         fig = go.Figure(layout=layout)
 
         for df in dfs:
@@ -1251,8 +1462,7 @@ def plot_lines(
                         **kwargs
                     )
                 )
-
-        fig.show()
+        return fig if is_return else fig.show()
     else:
         raise TypeError("Invalid parameter. Use 'sns' or 'go'.")
 
@@ -1383,8 +1593,9 @@ def plot_weights(
     plot_in: str='sns',
     size: tuple=(19,6),
     template: str='ggplot2',
+    is_return: bool=False,
     **kwargs
-) -> None:
+):
     """Plots a horizontal barplot of df (intended to contain columns as weight vectors).
 
     Args:
@@ -1429,10 +1640,9 @@ def plot_weights(
             )
 
         fig.update_layout(template=template)
-        fig.show()
+        return fig if is_return else fig.show()
     else:
-        raise TypeError("Invalid parameter. Use 'sns' ou 'go'.")
-
+        raise TypeError("Invalid parameter. Use 'sns' or 'go'.")
 
 #-----------------------------------------------------------------
 if __name__ == '__main__':

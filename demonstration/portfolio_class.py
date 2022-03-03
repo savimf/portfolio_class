@@ -61,8 +61,7 @@ class Portfolio():
         self._cryptos = [] if not crypto else assets
         self.prices = qt.wallet(
             assets,
-            start,
-            end,
+            start, end,
             source,
             crypto,
             **kwargs
@@ -529,12 +528,13 @@ class Portfolio():
     def benchmark(
         self,
         portfolios: list,
+        titles: list=['Benchmark', 'Date', 'Factor'],
         plot_in: str='sns',
         size: tuple=(19, 6),
         name: str=None,
         is_return: bool=False,
         **kwargs
-    ) -> None:
+    ):
         """Plots a benchmark with the Portfolio calling this method
         with the Portfolios in 'portfolios'.
 
@@ -569,14 +569,11 @@ class Portfolio():
                 axis=1,
                 join='inner'
             )
-
-        titles = [
-            f'Benchmark: {self.dates[0].strftime("%d/%m/%Y")} - {self.dates[1].strftime("%d/%m/%Y")}',
-            'Date',
-            'Factor'
-        ]
-
-        qt.plot_lines(dfs=[bench], titles=titles, plot_in=plot_in, name=name, is_return=is_return, **kwargs)
+        return qt.plot_lines(
+            dfs=[bench], titles=titles,
+            plot_in=plot_in, name=name,
+            is_return=is_return, **kwargs
+        )
 
 
     def beta(self, benchmark) -> float:
